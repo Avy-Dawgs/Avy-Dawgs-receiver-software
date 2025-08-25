@@ -25,6 +25,16 @@ where
     /// Configure and start the first transfer.
     pub fn init(mut adc: Adc<A, Disabled>, mut channel: C<D, 0>, buffer: &'static mut [u16; BUFFER_SIZE]) -> Self
     {
+        adc.reset_sequence(); 
+        unsafe 
+        {
+            (*hal::pac::ADC1::ptr()) 
+                .sqr1() 
+                .modify(|_, w| 
+                    w.sq1().bits(1) 
+                );
+            
+        }
         adc.set_continuous(hal::adc::config::Continuous::Continuous);
         let mut adc_dma = adc.enable_dma(hal::adc::config::Dma::Single);
 

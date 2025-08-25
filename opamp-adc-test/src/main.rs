@@ -1,7 +1,7 @@
 #![no_main] 
 #![no_std]
 
-use stm32g4xx_hal as hal;
+use stm32g4xx_hal::{self as hal, dac::{Dac3IntSig1, DacExt, DacOutSet}, opamp::InternalOutput};
 
 use hal::{stm32,
     adc::{config::{self, SampleTime, Sequence}, AdcClaim, AdcCommonExt}, cortex_m::{self}, dma::{channel::DMAExt}, opamp::{OpampEx, Gain, IntoPga}, pwr::{PwrExt}, rcc::{self, RccExt}, 
@@ -15,7 +15,7 @@ use defmt::{info, println};
 
 mod amplifier;
 mod adc_dma;
-use crate::{adc_dma::AdcDmaTransfer, amplifier::{OpampExt, OpampGainDB}}; 
+use crate::{adc_dma::AdcDmaTransfer, amplifier::{OpampGainDB, OpampPga, OpampPga2}}; 
 
 
 const BUFFER_SIZE: usize = 100;
@@ -40,33 +40,34 @@ fn main() -> !
     let gpiob = dp.GPIOB.split(&mut rcc);
     let mut led = gpiob.pb8.into_push_pull_output();
 
+    // gpio
     let gpioa = dp.GPIOA.split(&mut rcc);
-    let pa0 = gpioa.pa0.into_analog();
-    let pa1 = gpioa.pa1.into_analog();
     let pa3 = gpioa.pa3.into_analog();
+
+    // dac
+    let mut dac3ch1 = dp.DAC3.constrain(Dac3IntSig1, &mut rcc);
+    dac3ch1 = dac3ch1.calibrate_buffer(&mut delay); // TODO: move to OpampPga struct init
 
     // dma
     let channels = dp.DMA1.split(&rcc);
 
-    let ch1 = channels.ch1;
-
-    // configure opamps
+    // opamp
     let (opamp1, _opamp2, _opamp3) = dp.OPAMP.split(&mut rcc);
-    let mut pga1 = opamp1.pga_external_bias(pa1, pa3, Gain::Gain2);
-    pga1.set_gain(OpampGainDB::Gain6);
 
-    // configure adcs
+    let pga = OpampPga2::init(opamp1, dac3ch1, pa3, &mut rcc);
+
+    // adc
     let clk_cfg = config::ClockMode::AdcKerCk { prescaler: (config::Prescaler::Div_1), src: (config::ClockSource::PllP) };
     let adc12_common = dp.ADC12_COMMON.claim(clk_cfg, &mut rcc);
     let mut adc = adc12_common.claim(dp.ADC1, &mut delay);
 
-    adc.reset_sequence(); 
-    adc.configure_channel(&pa0, Sequence::One, SampleTime::Cycles_2_5);
+    // adc.reset_sequence(); 
+    // adc.configure_channel(&pa0, Sequence::One, SampleTime::Cycles_2_5);
 
     let mut aux_buffer = cortex_m::singleton!(BUF2: Buffer = [0; BUFFER_SIZE]).unwrap();
     let first_buffer = cortex_m::singleton!(BUF1 : Buffer = [0; BUFFER_SIZE]).unwrap();
 
-    let mut transfer = AdcDmaTransfer::init(adc, ch1, first_buffer);
+    let mut transfer = AdcDmaTransfer::init(adc, channels.ch1, first_buffer);
 
     loop {
         // wait for next buffer
